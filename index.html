@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>GeoJSONファイルを読み込み、正規化してコンパクトに</title>
+</head>
+<body>
+  <h3>実質的に正規化されているGeoJSONファイルを読み込み、コンパクトなGeoJSONにします</h3>
+<p>実際には正規化されたプロパティがたくさんあり、レコード(Feature)数もたくさんあるGeoJSONではかなり（数分の一とか）小さくなると思います</p>
+  <input type="file" id="fileInput">
+  <button onclick="loadGeoJSON()">読み込む</button>
+    <button id="saveButton">コンパクト正規化GeoJSON保存</button>
+    <button id="CSVsaveButton">CSV保存(Pointのみ)</button>
+
+  <pre id="resultMsg"></pre>
+
+  <script>
+    // Programmed by Satoru Takagi
+    // Copyright 2025 by Satoru Takagi All Rights Reserved
+    // License: GPL V3
+let  geojson, tschema
+function loadGeoJSON() {
+	const fileInput = document.getElementById('fileInput');
+	const file = fileInput.files[0];
+	const reader = new FileReader();
+	reader.onload = function(e) {
+		geojson = JSON.parse(e.target.result);
+		resultMsg.innerText="読み込み完了";
+		console.log("parse done");
+		reformat(geojson);
+	};
+	reader.readAsText(file);
+}
+
+
+function reformat(js){
+	tschema ={};
+	for ( var ft of js.features){
+		for ( var pn in ft.properties ){
+			if (!tschema[pn]){
+				tschema[pn]=true;
+			}
+		}
+	}
+	tschema = Object.keys(tschema);
+	console.log("tschema:",tschema);
+	for ( var ft of js.features){
+		var props = ft.properties;
+		propArray = [];
+		for ( var pn of tschema){
+			var prop = props[pn];
+			//console.log(prop);
+			propArray.push(prop);
+		}
+		delete ft.properties;
+		ft.properties ={values:propArray};
+	}
+	js.propertyKeys = tschema;
+}
+
+const saveButton = document.getElementById('saveButton');
+saveButton.addEventListener('click', () => {
+	console.log("compacted GeoJSON:",geojson);
+	const jsonString = JSON.stringify(geojson);
+	// Blobを作成し、ダウンロードリンクを作成
+	const blob = new Blob([jsonString], { type: 'application/json' });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = 'data.json'; // 保存ファイル名
+	a.click();
+	URL.revokeObjectURL(url);
+	resultMsg.innerText=("コンパクト正規化GeoJSON保存完了");
+});
+
+const CSVsaveButton = document.getElementById('CSVsaveButton');
+CSVsaveButton.addEventListener('click',()=>saveCsv());
+CSVsaveButton.addEventListener('contextmenu',()=>saveCsv(true)); // 隠し機能・右クリックで雑なCSV生成
+
+function saveCsv(roughOpt){
+	console.log("saveCsv: roughOpt:",roughOpt);
+	let csv;
+	if (roughOpt ){
+		csv =arrayToCsvRough(geojson.propertyKeys) + ",longitude,latitude";
+	} else {
+		csv =arrayToCsv(geojson.propertyKeys) + ",longitude,latitude";
+	}
+	for ( var ft of geojson.features){
+		if ( ft.geometry.type!="Point"){continue}
+		let line;
+		if (roughOpt ){
+			line= arrayToCsvRough(ft.properties.values) + "," + ft.geometry.coordinates.join();
+		} else {
+			line= arrayToCsv(ft.properties.values) + "," + ft.geometry.coordinates.join();
+		}
+		csv += "\n" + line;
+	}
+	console.log("csv:",csv);
+	// Blobを作成し、ダウンロードリンクを作成
+	const blob = new Blob([csv], { type: 'text/csv' });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = 'data.csv'; // 保存ファイル名
+	a.click();
+	URL.revokeObjectURL(url);
+	resultMsg.innerText=("CSV保存完了"+ ( roughOpt ? " (粗雑版)" : "(RFC4180)" ));
+}
+
+function arrayToCsvRough(arr) { // 雑なCSV生成(カンマをセミコロンに、改行を除去)～こちらの方が、単にsplit(",")でOKなので扱いやすいのは確かなんですがね・・・
+	let csv = "";
+	for (let i = 0; i < arr.length; i++) {
+		let value = arr[i];
+		// 文字列の場合、カンマをセミコロンに変換（簡便なテキストエディタでも崩れないようにあえてダブルクオーテーションじゃなくしてます・・・)
+		if (typeof value === "string") {
+			value = value.replace(/,/g, ";");
+			value = value.replaceAll("\n", "");
+		}
+		csv += value;
+		// 最後の要素以外はカンマを追加
+		if (i < arr.length - 1) {
+			csv += ",";
+		}
+	}
+	return csv;
+}
+
+function arrayToCsv(row) { // CSV行生成(RFC4180)
+	// 行が配列でない場合はエラー
+	if (!Array.isArray(row)) {
+		throw new Error("Invalid input: row must be an array.");
+	}
+	const escapedValues = row.map(value => {
+		// 値がnullまたはundefinedの場合は空文字に変換
+		if (value === null || value === undefined) {
+			return "";
+		}
+		// 値が数値の場合は文字列に変換
+		if (typeof value === "number") {
+			return value.toString();
+		}
+		// 値が真偽値の場合は文字列に変換
+		if (typeof value === "boolean") {
+			return value.toString();
+		}
+		// 値が文字列の場合
+		let str = value.toString();
+		// 値にカンマ、ダブルクォート、改行が含まれる場合はダブルクォートで囲む
+		if (str.includes(",") || str.includes("\"") || str.includes("\n")) {
+			str = "\"" + str.replace(/"/g, "\"\"") + "\""; // ダブルクォートをエスケープ
+		}
+		return str;
+	});
+	return escapedValues.join(","); // カンマで結合して1行の文字列にする
+}
+
+</script>
+</body>
+</html>
