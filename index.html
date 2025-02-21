@@ -11,6 +11,7 @@
 	<button onclick="loadGeoJSON()">読み込む</button>
 	<button id="saveButton">コンパクト正規化GeoJSON保存</button>
 	<button id="CSVsaveButton">CSV保存(Pointのみ)</button>
+	<button id="WKTsaveButton">CSV保存(WKT)</button>
 	小数点以下有効桁数：
 	<select id="precisionSelect" autocomplete="off"><option value="-1" selected>変更せず</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select>
 
@@ -77,22 +78,32 @@ saveButton.addEventListener('click', () => {
 const CSVsaveButton = document.getElementById('CSVsaveButton');
 CSVsaveButton.addEventListener('click',()=>saveCsv());
 CSVsaveButton.addEventListener('contextmenu',()=>saveCsv(true)); // 隠し機能・右クリックで雑なCSV生成
+const WKTsaveButton = document.getElementById('WKTsaveButton');
+WKTsaveButton.addEventListener('click',()=>saveCsv(undefined,true));
 
-function saveCsv(roughOpt){
-	console.log("saveCsv: roughOpt:",roughOpt);
+function saveCsv(roughOpt,wktOpt){
+	console.log("saveCsv: roughOpt:",roughOpt,wktOpt);
 	let csv;
-	if (roughOpt ){
-		csv =arrayToCsvRough(geojson.propertyKeys) + ",longitude,latitude";
+	if ( wktOpt ){
+		csv =arrayToCsvRough(geojson.propertyKeys) + ",WKT";
 	} else {
-		csv =arrayToCsv(geojson.propertyKeys) + ",longitude,latitude";
+		if (roughOpt ){
+			csv =arrayToCsvRough(geojson.propertyKeys) + ",longitude,latitude";
+		} else {
+			csv =arrayToCsv(geojson.propertyKeys) + ",longitude,latitude";
+		}
 	}
 	for ( var ft of geojson.features){
-		if ( ft.geometry.type!="Point"){continue}
 		let line;
-		if (roughOpt ){
-			line= arrayToCsvRough(ft.properties.values) + "," + ft.geometry.coordinates.join();
+		if ( wktOpt ){
+			line= `${arrayToCsv(ft.properties.values)},"${geojsonToWKT(ft.geometry)}"`;
 		} else {
-			line= arrayToCsv(ft.properties.values) + "," + ft.geometry.coordinates.join();
+			if ( ft.geometry.type!="Point"){continue}
+			if (roughOpt ){
+				line= arrayToCsvRough(ft.properties.values) + "," + ft.geometry.coordinates.join();
+			} else {
+				line= arrayToCsv(ft.properties.values) + "," + ft.geometry.coordinates.join();
+			}
 		}
 		csv += "\n" + line;
 	}
@@ -205,6 +216,46 @@ precisionSelect.addEventListener('change', (e) => {
 	}
 });
 
+function geojsonToWKT(geojson) {
+	if (!geojson || !geojson.type) {
+		return null;
+	}
+	const coordinates = geojson.coordinates;
+	switch (geojson.type) {
+		case 'Point':
+		return `POINT (${coordinates[0]} ${coordinates[1]})`;
+		case 'MultiPoint':
+		const multiPointCoords = coordinates.map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+		return `MULTIPOINT (${multiPointCoords})`;
+		case 'LineString':
+		const lineStringCoords = coordinates.map(coord => `${coord[0]} ${coord[1]}`).join(', ');
+		return `LINESTRING (${lineStringCoords})`;
+		case 'MultiLineString':
+		const multiLineStringCoords = coordinates.map(line => `(${line.map(coord => `${coord[0]} ${coord[1]}`).join(', ')})`).join(', ');
+		return `MULTILINESTRING (${multiLineStringCoords})`;
+		case 'Polygon':
+		const polygonCoords = coordinates.map(ring => `(${ring.map(coord => `${coord[0]} ${coord[1]}`).join(', ')})`).join(', ');
+		return `POLYGON (${polygonCoords})`;
+		case 'MultiPolygon':
+		const multiPolygonCoords = coordinates.map(polygon => `(${polygon.map(ring => `(${ring.map(coord => `${coord[0]} ${coord[1]}`).join(', ')})`).join(', ')})`).join(', ');
+		return `MULTIPOLYGON (${multiPolygonCoords})`;
+		case 'GeometryCollection':
+		const geometries = geojson.geometries.map(geometry => geojsonToWKT(geometry)).join(', ');
+		return `GEOMETRYCOLLECTION (${geometries})`;
+		case 'Feature':
+		if (geojson.geometry) {
+			return geojsonToWKT(geojson.geometry);
+		}
+		return null;
+		case 'FeatureCollection':
+		if (geojson.features && geojson.features.length > 0) {
+			return geojsonToWKT(geojson.features[0].geometry)
+		}
+		return null;
+		default:
+		return null;
+	}
+}
 
 </script>
 </body>
